@@ -1,10 +1,12 @@
 "use client";
 
+import type { CountryCode } from "libphonenumber-js";
 import { AnimatePresence, motion } from "motion/react";
 import { useRef, useState, type FormEvent } from "react";
 import { Face, type Expression } from "@/components/robot/face";
 import { RobotStage } from "@/components/robot/robot-stage";
 import { useBlink, useGaze } from "@/components/robot/use-gaze";
+import { checkPhone, PhoneField, useDefaultCountry } from "@/components/ui/phone-field";
 import { Reveal } from "@/components/ui/reveal";
 import { SplitWords } from "@/components/ui/split-words";
 import { cn, EASE } from "@/lib/motion";
@@ -34,6 +36,10 @@ export function Join() {
   const [error, setError] = useState("");
   const [typing, setTyping] = useState(false);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const defaultCountry = useDefaultCountry();
+  const [pickedCountry, setPickedCountry] = useState<CountryCode | null>(null);
+  const country = pickedCountry ?? defaultCountry;
+  const [phone, setPhone] = useState("");
 
   const follow = (el: HTMLInputElement | HTMLTextAreaElement) => {
     const r = el.getBoundingClientRect();
@@ -47,9 +53,22 @@ export function Join() {
     typingTimer.current = setTimeout(() => setTyping(false), 500);
   };
 
+  const clearError = () => {
+    if (status !== "error") return;
+    setStatus("idle");
+    setError("");
+  };
+
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const data = Object.fromEntries(new FormData(e.currentTarget));
+    const form = new FormData(e.currentTarget);
+    const text = (key: string) => String(form.get(key) ?? "");
+    const tel = checkPhone(phone, country);
+    if (!tel.ok) {
+      setStatus("error");
+      setError(tel.error);
+      return;
+    }
     setStatus("sending");
     setError("");
     try {
@@ -57,10 +76,15 @@ export function Join() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          ...data,
-          // only the active tab's message counts
-          message: intent === "early-access" ? "" : data.message,
           intent,
+          name: text("name"),
+          email: text("email"),
+          // only the active tab's message counts
+          message: intent === "early-access" ? "" : text("message"),
+          phone: tel.phone,
+          phoneCountry: tel.country,
+          phoneDialCode: tel.dialCode,
+          pracii_hp: text("pracii_hp"),
           pageUrl: window.location.href,
           referrer: document.referrer,
         }),
@@ -68,6 +92,7 @@ export function Join() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json.ok) throw new Error(json.error || "Something went wrong. Please try again.");
       setStatus("done");
+      setPhone("");
       gaze.lookAt(null);
     } catch (err) {
       setStatus("error");
@@ -89,9 +114,9 @@ export function Join() {
   return (
     <section id="join" className="relative py-6 lg:py-10">
       <div className="shell">
-        <div className="relative overflow-hidden rounded-[40px] bg-[linear-gradient(180deg,#fffbf0_0%,#eef8ff_45%,#c9e9ff_100%)] px-6 py-14 ring-1 ring-ink/[0.07] sm:px-12 lg:px-16 lg:py-20">
+        <div className="relative overflow-hidden rounded-[40px] bg-[linear-gradient(180deg,#fffbf0_0%,#eef8ff_45%,#c9e9ff_100%)] py-14 ring-1 ring-ink/[0.07] px-4 sm:px-12 lg:px-16 lg:py-20">
           <div className="grid items-end gap-14 lg:grid-cols-12">
-            <div className="lg:col-span-6">
+            <div className="min-w-0 lg:col-span-6">
               <p className="eyebrow text-body">Come along for the journey</p>
               <h3 className="font-display mt-6 text-[clamp(2.2rem,3.6vw,3.6rem)] leading-[1.05]">
                 <SplitWords text="We built the first one." stagger={0.04} />{" "}
@@ -111,13 +136,13 @@ export function Join() {
               </p>
             </div>
 
-            <div className="relative lg:col-span-5 lg:col-start-8">
+            <div className="relative min-w-0 lg:col-span-5 lg:col-start-8">
               <div className="relative z-0 mx-auto -mb-[9%] w-[62%]">
                 <RobotStage screenRef={screenRef} sizes="(min-width: 1024px) 24vw, 56vw" shadow={false}>
                   <Face expression={expression} gx={gaze.gx} gy={gaze.gy} blink={blink} />
                 </RobotStage>
               </div>
-              <div className="relative z-10 rounded-[28px] bg-white p-6 shadow-[0_40px_80px_-40px_rgb(0_74_173/0.55)] ring-1 ring-ink/[0.06] sm:p-8">
+              <div className="relative z-10 rounded-[28px] bg-white p-5 shadow-[0_40px_80px_-40px_rgb(0_74_173/0.55)] ring-1 ring-ink/[0.06] sm:p-8">
                 <AnimatePresence mode="wait" initial={false}>
                   {status === "done" ? (
                     <motion.div
@@ -192,6 +217,21 @@ export function Join() {
                         autoComplete="email"
                         placeholder="you@email.com"
                         className={field}
+                        onFocus={(e) => follow(e.currentTarget)}
+                        onInput={(e) => onType(e.currentTarget)}
+                        onBlur={() => gaze.lookAt(null)}
+                      />
+                      <PhoneField
+                        country={country}
+                        onCountryChange={(c) => {
+                          setPickedCountry(c);
+                          clearError();
+                        }}
+                        value={phone}
+                        onValueChange={(v) => {
+                          setPhone(v);
+                          clearError();
+                        }}
                         onFocus={(e) => follow(e.currentTarget)}
                         onInput={(e) => onType(e.currentTarget)}
                         onBlur={() => gaze.lookAt(null)}
