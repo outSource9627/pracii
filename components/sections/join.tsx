@@ -16,6 +16,12 @@ const INTENTS = [
 ] as const;
 type Intent = (typeof INTENTS)[number]["id"];
 
+// The form posts straight to the Xenotix admin, which stores it and lists it under
+// Pracii → Form Submissions. Point it elsewhere (e.g. a local admin) with
+// NEXT_PUBLIC_PRACII_SUBMIT_URL.
+const SUBMIT_URL =
+  process.env.NEXT_PUBLIC_PRACII_SUBMIT_URL ?? "https://xenotix-admin-opal.vercel.app/api/pracii/submit";
+
 const field =
   "w-full rounded-[14px] bg-cream px-4 py-3.5 text-[0.98rem] font-medium text-ink placeholder:text-faint ring-1 ring-ink/[0.08] outline-none transition-shadow duration-300 focus:ring-2 focus:ring-sky";
 
@@ -47,18 +53,32 @@ export function Join() {
     setStatus("sending");
     setError("");
     try {
-      const res = await fetch("/api/early-access", {
+      const res = await fetch(SUBMIT_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...data, intent }),
+        body: JSON.stringify({
+          ...data,
+          // only the active tab's message counts
+          message: intent === "early-access" ? "" : data.message,
+          intent,
+          pageUrl: window.location.href,
+          referrer: document.referrer,
+        }),
       });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json.error || "Something went wrong.");
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || "Something went wrong. Please try again.");
       setStatus("done");
       gaze.lookAt(null);
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      // fetch itself throws on network/CORS failures with a browser-specific message
+      setError(
+        err instanceof TypeError
+          ? "Couldn’t reach us just now. Please check your connection and try again."
+          : err instanceof Error
+            ? err.message
+            : "Something went wrong. Please try again.",
+      );
     }
   };
 
@@ -148,6 +168,14 @@ export function Join() {
                           </button>
                         ))}
                       </div>
+                      {/* Honeypot: hidden from people, irresistible to bots. Filled → the admin drops it. */}
+                      <input
+                        name="pracii_hp"
+                        tabIndex={-1}
+                        autoComplete="off"
+                        aria-hidden
+                        className="absolute -left-[9999px] h-px w-px opacity-0"
+                      />
                       <input
                         name="name"
                         autoComplete="name"
